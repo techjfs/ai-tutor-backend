@@ -6,4 +6,6 @@ ds_llm = ChatOpenAI(
     openai_api_key="ollama",  # 随便写，不校验，但必须提供
 )
 
-print(ds_llm.invoke("为什么要学Python？"))
+for chunk in ds_llm.stream("你好"):
+    print(type(chunk))
+    print(chunk)

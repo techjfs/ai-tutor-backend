@@ -1,23 +1,30 @@
+from contextlib import asynccontextmanager
 import json
 import uuid
-
+from ext_redis import redis_client
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 import uvicorn
-from langchain_community.chat_models import ChatOpenAI
-from celery import Celery
-import redis.asyncio as redis
+from tasks import process_query_llm_task
+from ext_taskiq import broker
+from taskiq import TaskiqDepends
+from typing import Annotated
 
-from prompt import ai_learn_path_prompt_template
 
-app = FastAPI()
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    print("start broker")
+    if not broker.is_worker_process:
+        await broker.startup()
+    yield
+    print("stop broker")
+    if not broker.is_worker_process:
+        await broker.shutdown()
 
-celery_app = Celery(
-    "llm_worker",
-    broker="redis://localhost:6379/0",
-    backend="redis://localhost:6379/1"
+
+app = FastAPI(
+    title="AI-Tutor",
+    lifespan=lifespan
 )
-
-redis_client = redis.Redis(host="localhost", port=6379, db=2)
 
 
 @app.get("/")
@@ -29,56 +36,8 @@ def ping():
     }
 
 
-@celery_app.task(bind=True)
-async def process_query_llm_task(self, question, task_id):
-    should_stop = False
-
-    pubsub = redis_client.pubsub()
-    await pubsub.subscribe(f"llm_control:{task_id}")
-
-    def check_stop_signal():
-        nonlocal should_stop
-        async for message in pubsub.listen():
-            if message["type"] == "message":
-                data = json.loads(message["data"])
-                if data.get("command") == "stop":
-                    should_stop = True
-                    return
-
-    # TODO: 先用线程实现，后面判断要不要改成asyncio
-    import threading
-    stop_thread = threading.Thread(target=check_stop_signal)
-    stop_thread.daemon = True
-    stop_thread.start()
-
-    prompt = ai_learn_path_prompt_template.invoke({"question": question})
-    ds_llm = ChatOpenAI(
-        model_name="deepseek-r1:1.5b",
-        openai_api_base="http://localhost:11434/v1",  # 注意是 /v1
-        openai_api_key="ollama",  # 随便写，不校验，但必须提供
-    )
-
-    channel_name = f"llm_response:{task_id}"
-
-    await redis_client.publish(channel_name, json.dumps({"event": "start", "data": "begin reply"}))
-
-    try:
-        for chunk in ds_llm.stream(prompt):
-            if should_stop:
-                await redis_client.publish(channel_name, json.dumps(
-                    {"event": "interrupted", "data": "generation was interrupted by user"}))
-                break
-
-            await redis_client.publish(channel_name, json.dumps({"event": "message", "data": chunk}))
-    except Exception as e:
-        await redis_client.publish(channel_name, json.dumps({"event": "error", "data": str(e)}))
-    finally:
-        await redis_client.publish(channel_name, json.dumps({"event": "end", "data": "end reply"}))
-        await pubsub.unsubscribe()
-
-
 @app.websocket("/ws/llm")
-async def ws_handler(websocket: WebSocket):
+async def ws_handler(websocket: Annotated[WebSocket, TaskiqDepends()]):
     await websocket.accept()
 
     active_tasks = {}
@@ -90,7 +49,8 @@ async def ws_handler(websocket: WebSocket):
                 question = data.get("question")
                 task_id = str(uuid.uuid4())
 
-                task_result = process_query_llm_task.delay(question, task_id)
+                print("execute taskiq task[process_query_llm_task]")
+                task_result = await process_query_llm_task.kiq(question, task_id)
                 active_tasks[task_id] = task_result
 
                 await websocket.send_json({
