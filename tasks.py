@@ -22,9 +22,11 @@ async def process_query_llm_task(question, task_id):
         try:
             while True:
                 message = await pubsub.get_message(ignore_subscribe_messages=True, timeout=0.01)
+                print(f"stop_signal {message}")
                 if message is not None and message["type"] == "message":
                     data = json.loads(message["data"])
                     if data.get("command") == "stop":
+                        print("set llm stop flag")
                         should_stop = True
                         return
                 # 给其他协程一个运行的机会
@@ -50,6 +52,7 @@ async def process_query_llm_task(question, task_id):
     try:
         for chunk in ds_llm.stream(prompt):
             if should_stop:
+                print("stop llm stream")
                 await redis_client.publish(channel_name, json.dumps(
                     {"event": "interrupted", "data": "generation was interrupted by user"}))
                 break

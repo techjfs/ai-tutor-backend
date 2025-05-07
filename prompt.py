@@ -59,7 +59,7 @@ AI_LEARN_PATH_PROMPT_TEMPLATE = """
 ### 5. ❓ 扩展问题推荐
 <div class="extend_questions">
 请生成3-5个具体技术问题，要求：
-1. 每个问题用<p></p>标签包裹
+1. 每个问题用html的p标签包裹
 2. 聚焦模型调优/学习计划/细分项目
 3. 避免通用性问题
 </div>
