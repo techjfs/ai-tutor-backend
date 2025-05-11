@@ -10,7 +10,7 @@ from dotenv import load_dotenv
 DEBUG=False
 
 if DEBUG:
-    load_dotenv(".env.sample")
+    load_dotenv(".env.example")
 else:
     load_dotenv(".env")
 
