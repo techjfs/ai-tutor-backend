@@ -5,19 +5,17 @@ import asyncio
 from ext_redis import redis_client
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 import uvicorn
-from tasks import process_query_llm_task
+from tasks import process_query_llm_task, message_histories
 from ext_taskiq import broker
 from taskiq import TaskiqDepends
-from typing import Annotated
+from typing import Annotated, List, Dict, Set
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    print("start broker")
     if not broker.is_worker_process:
         await broker.startup()
     yield
-    print("stop broker")
     if not broker.is_worker_process:
         await broker.shutdown()
 
@@ -26,6 +24,9 @@ app = FastAPI(
     title="AI-Tutor",
     lifespan=lifespan
 )
+
+connected_clients: Dict[str, WebSocket] = {}
+conversation_tracker: Dict[str, Set[str]] = {}
 
 
 @app.get("/")
@@ -41,9 +42,14 @@ def ping():
 async def ws_handler(websocket: Annotated[WebSocket, TaskiqDepends()]):
     await websocket.accept()
 
+    client_id = str(uuid.uuid4())
+    connected_clients[client_id] = websocket
+
     active_tasks = {}
     # 创建一个事件字典来控制各个任务的监听循环
     stop_events = {}
+
+    conversation_id = None
 
     async def listen_for_redis_messages(task_id, stop_event):
         """监听特定任务的Redis消息"""
@@ -58,7 +64,9 @@ async def ws_handler(websocket: Annotated[WebSocket, TaskiqDepends()]):
                     await websocket.send_json({
                         "type": "llm_response",
                         "event": result.get("event"),
-                        "data": result.get("data")
+                        "data": result.get("data"),
+                        "task_id": task_id,
+                        "conversation_id": conversation_id,
                     })
 
                     if result.get("event") in ["end", "interrupted", "error"]:
@@ -85,8 +93,29 @@ async def ws_handler(websocket: Annotated[WebSocket, TaskiqDepends()]):
                 question = data.get("question")
                 task_id = str(uuid.uuid4())
 
+                new_conversation_id = data.get("conversation_id")
+                is_followup = False
+
+                if new_conversation_id:
+                    if (new_conversation_id in message_histories and message_histories[new_conversation_id]) or \
+                            (new_conversation_id in conversation_tracker and conversation_tracker[new_conversation_id]):
+                        conversation_id = new_conversation_id
+                        is_followup = True
+                    else:
+                        conversation_id = new_conversation_id
+                        conversation_tracker[conversation_id] = set()
+                else:
+                    conversation_id = str(uuid.uuid4())
+                    conversation_tracker[conversation_id] = set()
+
+                conversation_tracker[conversation_id].add(task_id)
+
+                print(f"process_query_llm_task: conversation_id={conversation_id}, is_followup={is_followup}")
+
                 # 启动任务
-                task = await process_query_llm_task.kiq(question, task_id)
+                task = await process_query_llm_task.kiq(
+                    question, task_id, conversation_id=conversation_id, is_followup=is_followup
+                )
                 active_tasks[task_id] = task
 
                 # 创建停止事件
@@ -96,14 +125,15 @@ async def ws_handler(websocket: Annotated[WebSocket, TaskiqDepends()]):
                 # 通知客户端任务已开始
                 await websocket.send_json({
                     "type": "task_started",
-                    "task_id": task_id
+                    "task_id": task_id,
+                    "conversation_id": conversation_id,
+                    "is_followup": is_followup,
                 })
 
                 # 创建并启动监听Redis消息的任务
                 asyncio.create_task(listen_for_redis_messages(task_id, stop_event))
 
             elif data.get("type") == "stop" and data.get("task_id") in active_tasks:
-                print("receive stop message")
                 task_id = data.get("task_id")
 
                 # 停止任务
@@ -130,7 +160,6 @@ async def ws_handler(websocket: Annotated[WebSocket, TaskiqDepends()]):
                 print("stop generation")
 
     except WebSocketDisconnect:
-        print("WebSocket disconnected")
         # 清理所有活动任务
         for task_id, task_result in active_tasks.items():
             await redis_client.publish(
@@ -140,6 +169,9 @@ async def ws_handler(websocket: Annotated[WebSocket, TaskiqDepends()]):
             # 设置停止事件
             if task_id in stop_events:
                 stop_events[task_id].set()
+
+        if client_id in connected_clients:
+            del connected_clients[client_id]
 
         active_tasks.clear()
         stop_events.clear()

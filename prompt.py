@@ -1,4 +1,5 @@
-from langchain_core.prompts import PromptTemplate
+from langchain_core.prompts import PromptTemplate, ChatPromptTemplate, MessagesPlaceholder
+from langchain_core.messages import SystemMessage, HumanMessage
 
 AI_LEARN_PATH_PROMPT_TEMPLATE = """
 你是一位专业的 AI 学习路径规划师。请先执行以下判断步骤：
@@ -90,3 +91,52 @@ AI_LEARN_PATH_PROMPT_TEMPLATE = """
 """
 
 ai_learn_path_prompt_template = PromptTemplate.from_template(AI_LEARN_PATH_PROMPT_TEMPLATE)
+
+
+AI_FOLLOWUP_PROMPT_TEMPLATE = """
+你是一位专业的 AI 学习路径规划师。用户正在向你提出后续问题。
+
+之前的对话历史如下:
+{history}
+
+现在用户的后续问题是:
+{question}
+
+请注意:
+1. 如果后续问题是对你之前学习路径的追问，请针对性回答，保持建议的连贯性和一致性。
+2. 如果是全新的AI学习相关问题，按照完整的学习路径框架回答。
+3. 如果问题与「AI学习」「机器学习」「深度学习」「职业发展」「技能提升」无关，则回答"我不知道"。
+
+对于相关的AI学习问题，请使用以下格式回答:
+
+```markdown
+### 📝 回复内容
+(此处是你的详细回答，针对用户的后续问题提供专业、有深度的回答)
+
+### ❓ 扩展问题推荐
+<div class="extend_questions">
+<p>后续问题1</p>
+<p>后续问题2</p>
+<p>后续问题3</p>
+</div>
+```
+
+请保持回答的专业性和针对性，并确保扩展问题与当前讨论主题高度相关。
+"""
+
+SYSTEM_PROMPT = """你是一位专业的 AI 学习路径规划师。
+
+请遵循以下规则：
+1. 如果用户问题与「AI学习」「机器学习」「深度学习」「职业发展」「技能提升」无关，请回答："我不知道"
+2. 如果问题相关，请提供结构化的学习路径，包括学习目标解析、阶段划分学习计划、项目实践推荐、附加建议等
+3. 始终以Markdown格式输出你的回答
+4. 在回答结束时提供3-5个有针对性的扩展问题，包裹在<div class="extend_questions"><p>问题1</p><p>问题2</p></div>标签中
+"""
+
+ai_followup_prompt_template = ChatPromptTemplate.from_messages([
+    SystemMessage(content=SYSTEM_PROMPT),
+    MessagesPlaceholder(variable_name="history"),
+    HumanMessage(content="{question}")
+])
+
+
