@@ -1,21 +1,34 @@
 import asyncio
-
+import os
 from langchain_community.chat_models import ChatOpenAI
 from prompt import ai_learn_path_prompt_template
 from ext_taskiq import broker
 from ext_redis import redis_client
 import json
+from dotenv import load_dotenv
+
+DEBUG=False
+
+if DEBUG:
+    load_dotenv(".env.sample")
+else:
+    load_dotenv(".env")
+
+MODEL_NAME = os.getenv("MODEL_NAME")
+OPENAI_API_BASE = os.getenv("OPENAI_API_BASE")
+OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
+
+print(f"MODEL_NAME:{MODEL_NAME}")
+print(f"OPENAI_API_BASE:{OPENAI_API_BASE}")
+print(f"OPENAI_API_KEY:{OPENAI_API_KEY}")
 
 
 @broker.task
 async def process_query_llm_task(question, task_id):
-    print(f"question:{question} task_id:{task_id}")
     should_stop = False
 
     pubsub = redis_client.pubsub()
     await pubsub.subscribe(f"llm_control:{task_id}")
-
-    print("subscribe ok")
 
     async def check_stop_signal():
         nonlocal should_stop
@@ -37,9 +50,9 @@ async def process_query_llm_task(question, task_id):
 
     prompt = ai_learn_path_prompt_template.invoke({"question": question})
     ds_llm = ChatOpenAI(
-        model_name="deepseek-r1:1.5b",
-        openai_api_base="http://localhost:11434/v1",  # 注意是 /v1
-        openai_api_key="ollama",  # 随便写，不校验，但必须提供
+        model_name=MODEL_NAME,
+        openai_api_base=OPENAI_API_BASE,  # 注意是 /v1
+        openai_api_key=OPENAI_API_KEY,  # 随便写，不校验，但必须提供
     )
 
     channel_name = f"llm_response:{task_id}"
