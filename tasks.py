@@ -22,7 +22,6 @@ async def process_query_llm_task(question, task_id):
         try:
             while True:
                 message = await pubsub.get_message(ignore_subscribe_messages=True, timeout=0.01)
-                print(f"stop_signal {message}")
                 if message is not None and message["type"] == "message":
                     data = json.loads(message["data"])
                     if data.get("command") == "stop":
