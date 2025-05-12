@@ -71,7 +71,7 @@ async def process_query_llm_task(question, task_id, conversation_id=None, is_fol
 
     channel_name = f"llm_response:{task_id}"
 
-    print("begin reply to api server")
+    print(f"begin reply to api server:\n{prompt.to_string()}")
 
     await redis_client.publish(channel_name, json.dumps({"event": "start", "data": "begin reply"}))
 

@@ -92,7 +92,6 @@ AI_LEARN_PATH_PROMPT_TEMPLATE = """
 
 ai_learn_path_prompt_template = PromptTemplate.from_template(AI_LEARN_PATH_PROMPT_TEMPLATE)
 
-
 AI_FOLLOWUP_PROMPT_TEMPLATE = """
 你是一位专业的 AI 学习路径规划师。用户正在向你提出后续问题。
 
@@ -134,9 +133,7 @@ SYSTEM_PROMPT = """你是一位专业的 AI 学习路径规划师。
 """
 
 ai_followup_prompt_template = ChatPromptTemplate.from_messages([
-    SystemMessage(content=SYSTEM_PROMPT),
-    MessagesPlaceholder(variable_name="history"),
-    HumanMessage(content="{question}")
+    ('system', SYSTEM_PROMPT),
+    ("placeholder", "{history}"),
+    ('human', '{question}')
 ])
-
-
